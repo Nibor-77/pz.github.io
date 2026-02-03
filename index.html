@@ -3,71 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>龍舟隊報到系統</title>
+    <title>龍舟打卡</title>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding-top: 50px; }
-        .btn { padding: 15px 30px; font-size: 20px; cursor: pointer; background: #00B900; color: white; border: none; border-radius: 5px; display: none; margin: 20px auto; }
-        #status { color: #666; margin: 20px; }
-    </script>
+        body { font-family: sans-serif; text-align: center; padding-top: 50px; background: #f0f0f0; }
+        .btn { padding: 20px 40px; font-size: 20px; cursor: pointer; background: #00B900; color: white; border: none; border-radius: 10px; display: none; margin: auto; }
+    </style>
 </head>
 <body>
-    <h2>🐉 龍舟隊練習報到</h2>
-    <div id="status">正在載入 LINE 身分...</div>
-    <button id="checkInBtn" class="btn">確認報到</button>
+    <h2 id="msg">身分驗證中...</h2>
+    <button id="btn" class="btn">確認報到</button>
 
     <script>
         const GAS_URL = "https://script.google.com/macros/s/AKfycbx5_T2WF-VYl22q9YITUGkqt-2wNaG-6WXivCnzcbi1LMxKT8-bTBvtYmRNBB2pd4uj/exec"; // 貼上剛剛部署完的 exec 網址
         const LIFF_ID = "2009026488-y3Tjhqh5";     // 貼上 LINE Developers 的 LIFF ID
 
-        async function init() {
+        async function main() {
             try {
                 await liff.init({ liffId: LIFF_ID });
                 if (!liff.isLoggedIn()) {
                     liff.login();
-                } else {
-                    const profile = await liff.getProfile();
-                    document.getElementById("status").innerText = "隊友您好：" + profile.displayName;
-                    const btn = document.getElementById("checkInBtn");
-                    btn.style.display = "block";
+                    return;
+                }
 
-                    btn.onclick = async () => {
-                        btn.disabled = true;
-                        btn.innerText = "傳送中...";
-                        
-                        // 嘗試獲取位置，若失敗則傳送 null
-                        let lat = null, lng = null;
-                        try {
-                            const pos = await new Promise((res, rej) => {
-                                navigator.geolocation.getCurrentPosition(res, rej, {timeout: 5000});
-                            });
-                            lat = pos.coords.latitude;
-                            lng = pos.coords.longitude;
-                        } catch (e) {
-                            console.log("無法獲取位置");
-                        }
+                const profile = await liff.getProfile();
+                document.getElementById("msg").innerText = "你好，" + profile.displayName;
+                const btn = document.getElementById("btn");
+                btn.style.display = "block";
 
-                        // 傳送到後端 GAS
+                btn.onclick = async () => {
+                    btn.disabled = true;
+                    btn.innerText = "傳送中...";
+                    
+                    // 使用最簡單的傳送方式，避免 CORS 預檢請求失敗
+                    try {
                         await fetch(GAS_URL, {
                             method: "POST",
-                            mode: "no-cors", // 避免跨網域錯誤
+                            mode: "no-cors", 
+                            headers: { "Content-Type": "text/plain" },
                             body: JSON.stringify({
                                 userName: profile.displayName,
-                                userId: profile.userId,
-                                lat: lat,
-                                lng: lng
+                                userId: profile.userId
                             })
                         });
-
-                        alert("打卡成功！時間已紀錄。");
+                        
+                        alert("✅ 打卡成功！");
                         liff.closeWindow();
-                    };
-                }
-            } catch (err) {
-                document.getElementById("status").innerText = "錯誤: " + err.message;
+                    } catch (err) {
+                        alert("傳送失敗，請檢查網路：" + err);
+                        btn.disabled = false;
+                        btn.innerText = "重新報到";
+                    }
+                };
+            } catch (error) {
+                document.getElementById("msg").innerText = "初始化失敗：" + error;
             }
         }
-        init();
+        main();
     </script>
 </body>
 </html>
