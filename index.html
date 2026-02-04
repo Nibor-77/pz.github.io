@@ -3,57 +3,140 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>派兜打卡</title>
+    <title>派兜打卡系統</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
     <style>
-        body { font-family: -apple-system, sans-serif; text-align: center; background: #f8f9fa; padding-top: 50px; }
-        .container { background: white; width: 85%; max-width: 400px; margin: auto; padding: 25px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
-        .btn { padding: 18px 0; width: 100%; font-size: 1.2rem; cursor: pointer; background: #00B900; color: white; border: none; border-radius: 12px; display: none; font-weight: 600; }
-        #status { color: #888; margin: 20px 0; font-size: 0.9rem; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; text-align: center; background: #f0f2f5; padding-top: 40px; }
+        .container { background: white; width: 85%; max-width: 400px; margin: auto; padding: 30px 20px; border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { margin-bottom: 5px; color: #1a1a1a; font-weight: 700; }
+        #status { color: #666; margin-bottom: 25px; font-size: 0.9rem; }
+        
+        /* 按鈕樣式 */
+        .btn { padding: 16px 0; width: 100%; font-size: 1.1rem; cursor: pointer; background: #06c755; color: white; border: none; border-radius: 12px; display: none; font-weight: bold; letter-spacing: 1px; transition: all 0.2s; }
+        .btn:active { background: #05a546; transform: scale(0.98); }
+        .btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+        
+        /* 讀取動畫 */
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+        .loading { animation: pulse 1.5s infinite; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2 id="msg">身分驗證中...</h2>
-        <div id="status">點擊下方按鈕完成今日打卡</div>
-        <button id="checkInBtn" class="btn">確認報到</button>
+        <h2 id="msg">身分確認中...</h2>
+        <div id="status">正在連結系統</div>
+        <button id="checkInBtn" class="btn">確認出席</button>
     </div>
 
     <script>
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbxfU_nYKww5-NdxIBQmywCuEfhWJhEABYhMkUFrSBcQu_WWiEpJt_3kZ3OkRUHOEu42/exec"; // 貼上剛剛部署完的 exec 網址
-        const LIFF_ID = "2009026488-y3Tjhqh5";     // 貼上 LINE Developers 的 LIFF ID    
+        // ================= 設定區 (請在此填入資料) =================
+        const GAS_URL = "你的_GAS_部署網址"; // 務必確認結尾是 /exec
+        const LIFF_ID = "你的_LIFF_ID";
+        
+        // 地點：大佳河濱龍舟碼頭
+        const TARGET_LAT = 25.0756925;
+        const TARGET_LNG = 121.5443535;
+        const ALLOWED_RADIUS = 500; // 允許半徑 (公尺)
+        // ========================================================
 
+        // --- 🎲 隨機文案庫 ---
+        
+        // 情境 A：成功抵達 (勵志/熱血)
+        const successMsgs = [
+            "今天的你，氣場兩米八！划起來！💪",
+            "既然來了，就划爆它！GOGOGO！",
+            "你的肌肉在呼喚你，快去熱身！🔥",
+            "聽說今天水況不錯，破個紀錄吧？",
+            "認真划船的人最帥/最美！😍",
+            "龍舟魂燃燒！把水面炸開吧！",
+            "風雨無阻，這就是龍舟精神！",
+            "不要問，划就對了！"
+        ];
+
+        // 情境 B：距離太遠 (嘲諷/防弊)
+        const errorMsgs = [
+            "不要當划船騙子！😡",
+            "你是在夢裡划船嗎？醒醒！😴",
+            "這個距離...你是想用意念划船？🧠",
+            "這裡看不到河，只看得到你的藉口。👀",
+            "騙過了系統，騙不過教練的眼睛。",
+            "除非你會瞬間移動，不然這距離不科學。🛸",
+            "誠實是美德，距離是現實。📏",
+            "教練在你背後，他現在非常火。🔥"
+        ];
+
+        // --- 工具函式 ---
+        
+        function getRandomText(arr) {
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        // Haversine 公式計算距離 (回傳公尺)
+        function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+            var R = 6371; 
+            var dLat = deg2rad(lat2 - lat1);
+            var dLon = deg2rad(lon2 - lon1);
+            var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c * 1000;
+        }
+        function deg2rad(deg) { return deg * (Math.PI / 180); }
+
+        function getPosition() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) { reject(new Error("不支援定位")); return; }
+                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                    enableHighAccuracy: true, timeout: 8000, maximumAge: 0
+                });
+            });
+        }
+
+        // --- 主程式邏輯 ---
         async function main() {
             try {
+                // 1. 初始化 LIFF
                 await liff.init({ liffId: LIFF_ID });
                 if (!liff.isLoggedIn()) { liff.login(); return; }
 
                 const profile = await liff.getProfile();
-                document.getElementById("msg").innerText = "你好，" + profile.displayName;
+                document.getElementById("msg").innerText = profile.displayName;
+                document.getElementById("status").innerText = "歡迎參加練習！";
+                
                 const btn = document.getElementById("checkInBtn");
                 btn.style.display = "block";
 
+                // 2. 按鈕點擊事件
                 btn.onclick = async () => {
                     btn.disabled = true;
-                    btn.innerText = "傳送中...";
-
+                    btn.innerText = "定位與判斷中...";
+                    btn.classList.add("loading");
+                    
                     let lat = null, lng = null;
+                    let distance = 0;
+                    let isNearby = false;
 
-                    // 嘗試獲取 GPS 座標
+                    // 3. 獲取位置
                     try {
-                        const position = await new Promise((resolve, reject) => {
-                            navigator.geolocation.getCurrentPosition(resolve, reject, {
-                            enableHighAccuracy: true, // 開啟高精準度
-                            timeout: 5000            // 5秒沒抓到就跳過，避免隊員等太久
-                            });
-                        });
+                        const position = await getPosition();
                         lat = position.coords.latitude;
                         lng = position.coords.longitude;
-                    } catch (e) {
-                    console.warn("無法取得位置資訊", e);
+                        
+                        // 計算距離
+                        distance = getDistanceFromLatLonInKm(lat, lng, TARGET_LAT, TARGET_LNG);
+                        isNearby = distance <= ALLOWED_RADIUS;
+                    } catch (err) {
+                        console.warn("定位失敗或超時");
                     }
-                    
+
+                    // 4. 傳送資料到 GAS (不管距離多遠都傳，留存紀錄)
                     try {
                         await fetch(GAS_URL, {
                             method: "POST",
@@ -62,30 +145,53 @@
                             body: JSON.stringify({
                                 userName: profile.displayName,
                                 userId: profile.userId,
-                                lat: lat,   // 新增緯度
-                                lng: lng    // 新增經度
+                                lat: lat,
+                                lng: lng
                             })
                         });
 
-                        // 使用 SweetAlert2 取代原生 alert
-                        Swal.fire({
-                            title: '派兜打卡',
-                            text: '✅ 打卡成功！\n請努力划船！',
-                            icon: 'success',
-                            confirmButtonText: '確定',
-                            confirmButtonColor: '#00B900'
-                        }).then(() => {
-                            liff.closeWindow();
-                        });
+                        // 5. 根據結果彈出不同視窗
+                        if (lat && isNearby) {
+                            // ✅ 成功且在範圍內
+                            const randomMsg = getRandomText(successMsgs);
+                            Swal.fire({
+                                title: '打卡成功！',
+                                html: `距離碼頭 ${Math.round(distance)} 公尺<br><br><b>${randomMsg}</b>`,
+                                icon: 'success',
+                                confirmButtonText: '收到',
+                                confirmButtonColor: '#06c755'
+                            }).then(() => liff.closeWindow());
+
+                        } else if (lat && !isNearby) {
+                            // ❌ 成功但太遠
+                            const randomMsg = getRandomText(errorMsgs);
+                            Swal.fire({
+                                title: '距離太遠囉！',
+                                html: `目前距離碼頭 <b>${Math.round(distance)}</b> 公尺<br><br><span style="color:#d33; font-weight:bold">${randomMsg}</span>`,
+                                icon: 'error',
+                                confirmButtonText: '我去面壁',
+                                confirmButtonColor: '#d33'
+                            }).then(() => liff.closeWindow());
+
+                        } else {
+                            // ⚠️ 沒開定位
+                            Swal.fire({
+                                title: '打卡成功',
+                                text: '⚠️ 無法確認距離 (未開啟定位)\n請確認是否開啟 GPS',
+                                icon: 'warning',
+                                confirmButtonColor: '#f8bb86'
+                            }).then(() => liff.closeWindow());
+                        }
 
                     } catch (err) {
-                        Swal.fire('錯誤', '連線失敗，請稍後再試', 'error');
+                        Swal.fire('連線錯誤', '請檢查網路後重試', 'error');
                         btn.disabled = false;
-                        btn.innerText = "重新報到";
+                        btn.innerText = "重新打卡";
+                        btn.classList.remove("loading");
                     }
                 };
             } catch (error) {
-                document.getElementById("msg").innerText = "初始化失敗";
+                Swal.fire("系統錯誤", "無法載入 LIFF\n" + error.message, "error");
             }
         }
         main();
